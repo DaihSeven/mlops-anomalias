@@ -5,7 +5,7 @@ Plataforma de MLOps de ponta a ponta construída em torno de um modelo leve de d
 Tudo roda localmente, inclusive num GitHub Codespace de 2 núcleos, sem nenhum provedor de IA externo e sem custo.
 
 > ⚠️ **Aviso sobre os dados**
-> Todos os dados deste projeto são **sintéticos**, gerados por código em `src/anomalias/data.py`. Eles simulam leituras de sensores industriais (temperatura, pressão, vibração e corrente) com anomalias injetadas de forma controlada. Como os rótulos das anomalias são conhecidos, é possível medir a qualidade do modelo, mas os números refletem esse cenário simulado, **não um ambiente de produção real**.
+> Todos os dados deste projeto são **sintéticos**, gerados por código em `src/anomalias/data.py`. Eles simulam leituras de sensores industriais (`temperature` em °C, `pressure` em bar, `vibration` em mm/s e `current` em A) com anomalias injetadas de forma controlada. Como os rótulos das anomalias são conhecidos, é possível medir a qualidade do modelo, mas os números refletem esse cenário simulado, **não um ambiente de produção real**.
 
 ## Objetivo
 
@@ -14,6 +14,27 @@ Tudo roda localmente, inclusive num GitHub Codespace de 2 núcleos, sem nenhum p
 - Servir o modelo numa API FastAPI.
 - Expor métricas operacionais e de modelo para o Prometheus: latência, volume, taxa de anomalias e drift.
 - Visualizar a saúde do modelo no Grafana e disparar alertas pelo Alertmanager quando o modelo começar a se degradar.
+
+## Dados sintéticos
+
+Cada leitura tem quatro features:
+
+| Feature | Unidade | Média | Desvio padrão |
+|---------|---------|-------|---------------|
+| `temperature` | °C | 70 | 5 |
+| `pressure` | bar | 5 | 0,5 |
+| `vibration` | mm/s | 2 | 0,4 |
+| `current` | A | 15 | 2 |
+
+Os pontos normais vêm de uma normal multivariada com **correlação leve** entre as features: temperatura acompanha a corrente (0,40) e vibração acompanha a pressão (0,30). As demais correlações ficam entre 0,05 e 0,15.
+
+Uma fração dos pontos (`contamination`, 5% por padrão) vira anomalia, de três tipos:
+
+- **`spike`**: uma única feature salta de 6 a 10 desvios padrão, para cima ou para baixo.
+- **`out_of_range`**: de duas a quatro features saem da faixa ao mesmo tempo, de 4 a 7 desvios padrão.
+- **`improbable_combo`**: temperatura alta, corrente baixa e vibração alta (3 a 5 desvios cada). Os valores isolados não são absurdos, mas a combinação contraria a correlação dos dados normais.
+
+As estatísticas de referência para o drift (média e desvio de cada feature) são calculadas só com os pontos de treino que o modelo classificou como normais, sem usar os rótulos. Assim as anomalias não inflam o desvio de referência.
 
 ## Arquitetura
 
@@ -76,17 +97,18 @@ No Codespaces, acesse pela aba **Ports**. A senha do Grafana é definida pela va
 
 ```bash
 pip install -r requirements.txt
-python -m src.anomalias.train --n-samples 10000 --contamination 0.05 --seed 42
+pip install -e .
+python -m anomalias.train --n-samples 5000 --contamination 0.05 --seed 42
 ```
 
-Cada execução cria uma nova versão em `models/` e atualiza `models/current.json`.
+Cada execução cria uma nova versão em `models/` e atualiza `models/current.json`. Use `--no-activate` para salvar sem ativar e `python -m anomalias.train --help` para ver todas as opções. Os artefatos de `models/` são gerados localmente e não vão para o git.
 
 ### Fazer uma predição
 
 ```bash
 curl -X POST http://localhost:8000/predict \
   -H "Content-Type: application/json" \
-  -d '{"temperatura": 70.2, "pressao": 101.3, "vibracao": 0.42, "corrente": 12.1}'
+  -d '{"temperature": 70.2, "pressure": 5.1, "vibration": 2.1, "current": 15.3}'
 ```
 
 ### Simular tráfego (normal e com drift)
@@ -157,9 +179,9 @@ Números medidos neste ambiente, sem estimativas. Os valores marcados como _a me
 
 | Versão | Precisão | Recall | F1 | Tempo de treino |
 |--------|----------|--------|----|-----------------|
-| _a medir_ | _a medir_ | _a medir_ | _a medir_ | _a medir_ |
+| v2 | 0,935 | 0,960 | 0,947 | 2,2 s |
 
-Fonte: `models/model_vN.json`.
+Fonte: `models/model_vN.json`. Treino com 5000 amostras, 5% de anomalias e seed 42 (3500 para treino, 1500 para teste). O tempo de treino é o tempo total do comando `python -m anomalias.train`, incluindo geração dos dados e gravação do modelo.
 
 ### Desempenho da API e detecção de drift
 

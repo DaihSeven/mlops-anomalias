@@ -3,6 +3,9 @@ __pycache__/
 *.py[codz]
 *$py.class
 
+
+saidas.txt
+
 # C extensions
 *.so
 
@@ -218,3 +221,9 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Projeto: artefatos de modelo são gerados pelo treino, não versionados no git
+models/*.joblib
+models/*.json
+!models/.gitkeep
+*.tmp
