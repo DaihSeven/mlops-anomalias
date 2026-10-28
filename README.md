@@ -1,5 +1,7 @@
 # Detecção de Anomalias como Serviço: mini plataforma de MLOps
 
+<i> Projeto realizado em dois perfis meus no GitHub, este 1° @DaihSeven e o outro 2° @DevDaih [https://github.com/DevDaih/mlops-anomalias.git](https://github.com/DevDaih/mlops-anomalias.git) </i>
+
 Plataforma de MLOps de ponta a ponta construída em torno de um modelo leve de detecção de anomalias. O foco não é o modelo em si, e sim o que uma equipe de MLOps constrói ao redor dele: treino reprodutível, versionamento, serviço via API, monitoramento de desempenho e de desvio dos dados (drift), alertas e, nas próximas etapas, pipeline de CI/CD com retreino agendado e portão de qualidade.
 
 Tudo roda localmente, inclusive num GitHub Codespace de 2 núcleos, sem nenhum provedor de IA externo e sem custo.
