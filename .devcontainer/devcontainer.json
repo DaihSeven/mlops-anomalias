@@ -2,16 +2,8 @@
   "name": "mlops-anomalias",
   "image": "mcr.microsoft.com/devcontainers/python:1-3.11-bookworm",
   "features": {
-    "ghcr.io/devcontainers/features/docker-in-docker:2": {},
-    "ghcr.io/devcontainers/features/terraform:1": {},
-    "ghcr.io/devcontainers/features/kubectl-helm-minikube:1": { "minikube": "none" }
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {}
   },
   "forwardPorts": [8000, 9090, 3000, 9093],
-  "portsAttributes": {
-    "8000": { "label": "API" },
-    "9090": { "label": "Prometheus" },
-    "3000": { "label": "Grafana" },
-    "9093": { "label": "Alertmanager" }
-  },
-  "postCreateCommand": "pip install -r requirements.txt && pip install -e . && curl -fsSL https://claude.ai/install.sh | bash"
+  "postCreateCommand": "pip install -r requirements.txt && pip install -e ."
 }
