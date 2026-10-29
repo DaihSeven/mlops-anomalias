@@ -1,7 +1,11 @@
 """API de detecção de anomalias (FastAPI).
 
 Sobe com:
-    MODELS_DIR=models uvicorn api.main:app
+    MODELS_DIR=models uvicorn api.main:app --workers 1
+
+Use 1 worker: as janelas de drift e de anomaly_ratio vivem na memória do
+processo. Com N workers, cada um veria ~1/N do tráfego e o Prometheus
+coletaria a visão de um worker diferente a cada scrape.
 """
 
 from __future__ import annotations
@@ -18,12 +22,14 @@ import numpy as np
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
+from prometheus_client import CONTENT_TYPE_LATEST
 from pydantic import BaseModel
 
 from anomalias.data import FEATURES
 from anomalias.model_store import load_current
 from anomalias.train import predict_labels
+from api.metrics import ApiMetrics, MetricsMiddleware
 from api.schemas import HealthResponse, ModelInfo, Prediction, PredictRequest, PredictResponse
 
 logger = logging.getLogger("anomaly_api")
@@ -40,6 +46,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.model = None
     app.state.metadata = None
     app.state.load_error = None
+    # Registry novo a cada subida (ver api/metrics.py)
+    app.state.metrics = ApiMetrics()
 
     models_dir = _models_dir()
     try:
@@ -47,6 +55,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         if metadata.get("features") != FEATURES:
             raise ValueError(f"features do modelo {metadata.get('features')} diferem de {FEATURES}")
         app.state.model, app.state.metadata = model, metadata
+        app.state.metrics.set_model(int(metadata["version"]), metadata["reference_stats"])
         logger.info("Modelo v%s carregado de %s", metadata["version"], models_dir)
     except Exception as exc:
         # A API sobe mesmo sem modelo: /health mostra o problema e /predict responde 503
@@ -56,6 +65,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(title="Anomaly detection API", version="0.1.0", lifespan=lifespan)
+app.add_middleware(MetricsMiddleware)
 
 
 @app.exception_handler(RequestValidationError)
@@ -93,6 +103,11 @@ def health(request: Request) -> HealthResponse:
     )
 
 
+@app.get("/metrics", include_in_schema=False)
+def metrics(request: Request) -> Response:
+    return Response(request.app.state.metrics.render(), media_type=CONTENT_TYPE_LATEST)
+
+
 @app.get("/model", response_model=ModelInfo)
 def model_info(request: Request) -> ModelInfo:
     _, metadata = _require_model(request)
@@ -110,6 +125,8 @@ def predict(payload: PredictRequest, request: Request) -> PredictResponse:  # ty
     # a mesma convenção da roc_auc do treino. O modelo marca anomalia quando
     # anomaly_score > -model.offset_ (limiar definido pela contamination).
     scores = -model.score_samples(X)
+
+    request.app.state.metrics.record_predictions(X, labels)
 
     version = int(metadata["version"])
     return PredictResponse(

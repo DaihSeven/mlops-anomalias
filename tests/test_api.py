@@ -1,5 +1,6 @@
 import pytest
 from fastapi.testclient import TestClient
+from prometheus_client.parser import text_string_to_metric_families
 
 from anomalias import model_store
 from anomalias.data import FEATURES, MEANS, STDS
@@ -105,3 +106,94 @@ def test_api_without_model(client_without_model):
     assert r.status_code == 503
     assert "Nenhum modelo carregado" in r.json()["detail"]
     assert client_without_model.get("/model").status_code == 503
+
+
+# --- /metrics ---------------------------------------------------------------
+
+
+def _samples(client) -> list:
+    r = client.get("/metrics")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("text/plain")
+    return [s for fam in text_string_to_metric_families(r.text) for s in fam.samples]
+
+
+def _value(samples, name, **labels):
+    for s in samples:
+        if s.name == name and s.labels == labels:
+            return s.value
+    return None
+
+
+def test_metrics_after_some_calls(client):
+    client.get("/health")
+    client.post("/predict", json=NORMAL)
+    samples = _samples(client)
+
+    names = {s.name for s in samples}
+    expected = {
+        "anomaly_api_requests_total",
+        "anomaly_api_request_latency_seconds_bucket",
+        "anomaly_api_predictions_total",
+        "anomaly_api_anomalies_total",
+        "anomaly_api_anomaly_ratio",
+        "anomaly_api_model_version",
+    }
+    assert expected <= names
+    assert _value(samples, "anomaly_api_requests_total", endpoint="/health", status="200") == 1
+    assert _value(samples, "anomaly_api_requests_total", endpoint="/predict", status="200") == 1
+    assert _value(samples, "anomaly_api_model_version", version="1") == 1
+    # Poucos registros na janela: drift não é exportado (nem como 0)
+    assert not any(n.startswith("anomaly_api_drift_score") for n in names)
+
+
+def test_metrics_endpoint_not_counted(client):
+    client.get("/metrics")
+    client.get("/metrics")
+    samples = _samples(client)
+    assert not any(s.labels.get("endpoint") == "/metrics" for s in samples)
+
+
+def test_unknown_route_is_unmatched(client):
+    assert client.get("/nao-existe/123").status_code == 404
+    samples = _samples(client)
+    assert _value(samples, "anomaly_api_requests_total", endpoint="unmatched", status="404") == 1
+    assert not any("nao-existe" in str(s.labels) for s in samples)
+
+
+def test_predictions_total_counts_records(client):
+    client.post("/predict", json=[NORMAL, ANOMALOUS, NORMAL])
+    client.post("/predict", json=ANOMALOUS)
+    samples = _samples(client)
+    assert _value(samples, "anomaly_api_predictions_total") == 4
+    assert _value(samples, "anomaly_api_anomalies_total") == 2
+    assert _value(samples, "anomaly_api_anomaly_ratio") == pytest.approx(0.5)
+    assert _value(samples, "anomaly_api_requests_total", endpoint="/predict", status="200") == 2
+
+
+def test_validation_error_counted_as_422(client):
+    client.post("/predict", json={"temperature": "quente"})
+    samples = _samples(client)
+    assert _value(samples, "anomaly_api_requests_total", endpoint="/predict", status="422") == 1
+    assert _value(samples, "anomaly_api_predictions_total") == 0
+
+
+def test_drift_exported_after_min_samples(client):
+    client.post("/predict", json=[NORMAL] * 99)
+    assert _value(_samples(client), "anomaly_api_drift_score_max") is None
+    client.post("/predict", json=[NORMAL])
+    samples = _samples(client)
+    for feature in FEATURES:
+        assert _value(samples, "anomaly_api_drift_score", feature=feature) is not None
+    assert _value(samples, "anomaly_api_drift_score_max") is not None
+
+
+def test_metrics_without_model(client_without_model):
+    client_without_model.post("/predict", json=NORMAL)
+    samples = _samples(client_without_model)
+    assert _value(samples, "anomaly_api_requests_total", endpoint="/predict", status="503") == 1
+    assert not any(s.name == "anomaly_api_model_version" for s in samples)
+
+
+def test_metrics_not_in_openapi(client):
+    assert "/metrics" not in client.get("/openapi.json").json()["paths"]
