@@ -13,7 +13,7 @@ from typing import Any
 
 import numpy as np
 from sklearn.ensemble import IsolationForest
-from sklearn.metrics import f1_score, precision_score, recall_score
+from sklearn.metrics import f1_score, precision_score, recall_score, roc_auc_score
 from sklearn.model_selection import train_test_split
 
 from anomalias import model_store
@@ -65,6 +65,9 @@ def train(
         "precision": float(precision_score(y_test, y_pred, zero_division=0)),
         "recall": float(recall_score(y_test, y_pred, zero_division=0)),
         "f1": float(f1_score(y_test, y_pred, zero_division=0)),
+        # score_samples é maior para pontos normais; negando, maior = mais anômalo,
+        # que é a orientação que a AUC espera para o rótulo 1 = anomalia
+        "roc_auc": float(roc_auc_score(y_test, -model.score_samples(X_test))),
     }
 
     metadata = {

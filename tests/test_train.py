@@ -8,12 +8,14 @@ from anomalias.data import FEATURES, STDS
 from anomalias.train import main, train
 
 MIN_F1 = 0.80
+MIN_AUC = 0.90
 
 
 @pytest.mark.parametrize("seed", [0, 1, 2])
-def test_f1_above_minimum(seed):
+def test_quality_above_minimum(seed):
     _, meta = train(n_samples=3000, contamination=0.05, seed=seed)
     assert meta["metrics"]["f1"] >= MIN_F1, meta["metrics"]
+    assert meta["metrics"]["roc_auc"] >= MIN_AUC, meta["metrics"]
 
 
 def test_metadata_has_reference_stats():
@@ -41,6 +43,7 @@ def test_cli_saves_versioned_model(tmp_path, capsys):
 
     out = capsys.readouterr().out
     assert '"f1"' in out
+    assert '"roc_auc"' in out
     _, meta = model_store.load_current(tmp_path)
     assert meta["version"] == 2
     assert json.loads((tmp_path / "model_v1.json").read_text())["hyperparams"]["n_estimators"] == 50
